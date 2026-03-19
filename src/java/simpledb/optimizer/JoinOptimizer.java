@@ -243,10 +243,40 @@ public class JoinOptimizer {
             Map<String, TableStats> stats,
             Map<String, Double> filterSelectivities, boolean explain)
             throws ParsingException {
+        PlanCache planCache = new PlanCache();
 
-        // some code goes here
-        //Replace the following
-        return joins;
+        for (int i = 1; i <= joins.size(); i++) {
+            Set<Set<LogicalJoinNode>> subsets = enumerateSubsets(joins, i);
+            for (Set<LogicalJoinNode> subset : subsets) {
+                double bestCost = Double.MAX_VALUE;
+                CostCard bestCard = null;
+
+                for (LogicalJoinNode join : subset) {
+                    CostCard candidate = computeCostAndCardOfSubplan(
+                            stats, filterSelectivities, join, subset, bestCost, planCache);
+                    if (candidate != null && candidate.cost < bestCost) {
+                        bestCost = candidate.cost;
+                        bestCard = candidate;
+                    }
+                }
+
+                if (bestCard != null) {
+                    planCache.addPlan(subset, bestCard.cost, bestCard.card, bestCard.plan);
+                }
+            }
+        }
+
+        Set<LogicalJoinNode> fullSet = new HashSet<>(joins);
+        List<LogicalJoinNode> bestOrder = planCache.getOrder(fullSet);
+        if (bestOrder == null) {
+            throw new ParsingException("failed to find a join order");
+        }
+
+        if (explain) {
+            printJoins(bestOrder, planCache, stats, filterSelectivities);
+        }
+
+        return bestOrder;
     }
 
     // ===================== Private Methods =================================
