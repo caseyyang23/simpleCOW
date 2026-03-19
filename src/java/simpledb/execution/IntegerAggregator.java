@@ -1,7 +1,15 @@
 package simpledb.execution;
 
 import simpledb.common.Type;
+import simpledb.storage.Field;
+import simpledb.storage.IntField;
 import simpledb.storage.Tuple;
+import simpledb.storage.TupleDesc;
+import simpledb.storage.TupleIterator;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Knows how to compute some aggregate over a set of IntFields.
@@ -9,6 +17,12 @@ import simpledb.storage.Tuple;
 public class IntegerAggregator implements Aggregator {
 
     private static final long serialVersionUID = 1L;
+    private final int gbfield;
+    private final Type gbfieldtype;
+    private final int afield;
+    private final Op what;
+    private final Map<Field, Integer> aggregateValues;
+    private final Map<Field, Integer> counts;
 
     /**
      * Aggregate constructor
@@ -26,7 +40,12 @@ public class IntegerAggregator implements Aggregator {
      */
 
     public IntegerAggregator(int gbfield, Type gbfieldtype, int afield, Op what) {
-        // some code goes here
+        this.gbfield = gbfield;
+        this.gbfieldtype = gbfieldtype;
+        this.afield = afield;
+        this.what = what;
+        this.aggregateValues = new LinkedHashMap<>();
+        this.counts = new LinkedHashMap<>();
     }
 
     /**
@@ -37,7 +56,49 @@ public class IntegerAggregator implements Aggregator {
      *            the Tuple containing an aggregate field and a group-by field
      */
     public void mergeTupleIntoGroup(Tuple tup) {
-        // some code goes here
+        Field groupField = gbfield == NO_GROUPING ? null : tup.getField(gbfield);
+        int value = ((IntField) tup.getField(afield)).getValue();
+
+        if (!aggregateValues.containsKey(groupField)) {
+            switch (what) {
+                case MIN:
+                case MAX:
+                case SUM:
+                case AVG:
+                    aggregateValues.put(groupField, value);
+                    break;
+                case COUNT:
+                    aggregateValues.put(groupField, 1);
+                    break;
+                default:
+                    throw new IllegalArgumentException("Unsupported aggregation op: " + what);
+            }
+            counts.put(groupField, 1);
+            return;
+        }
+
+        int current = aggregateValues.get(groupField);
+        int currentCount = counts.get(groupField);
+        switch (what) {
+            case MIN:
+                aggregateValues.put(groupField, Math.min(current, value));
+                break;
+            case MAX:
+                aggregateValues.put(groupField, Math.max(current, value));
+                break;
+            case SUM:
+                aggregateValues.put(groupField, current + value);
+                break;
+            case COUNT:
+                aggregateValues.put(groupField, current + 1);
+                break;
+            case AVG:
+                aggregateValues.put(groupField, current + value);
+                break;
+            default:
+                throw new IllegalArgumentException("Unsupported aggregation op: " + what);
+        }
+        counts.put(groupField, currentCount + 1);
     }
 
     /**
@@ -49,9 +110,35 @@ public class IntegerAggregator implements Aggregator {
      *         the constructor.
      */
     public OpIterator iterator() {
-        // some code goes here
-        throw new
-        UnsupportedOperationException("please implement me for lab2");
+        ArrayList<Tuple> tuples = new ArrayList<>();
+        TupleDesc td;
+
+        if (gbfield == NO_GROUPING) {
+            td = new TupleDesc(new Type[]{Type.INT_TYPE});
+            Integer aggregateValue = aggregateValues.get(null);
+            if (aggregateValue != null) {
+                if (what == Op.AVG) {
+                    aggregateValue = aggregateValue / counts.get(null);
+                }
+                Tuple tuple = new Tuple(td);
+                tuple.setField(0, new IntField(aggregateValue));
+                tuples.add(tuple);
+            }
+        } else {
+            td = new TupleDesc(new Type[]{gbfieldtype, Type.INT_TYPE});
+            for (Map.Entry<Field, Integer> entry : aggregateValues.entrySet()) {
+                int aggregateValue = entry.getValue();
+                if (what == Op.AVG) {
+                    aggregateValue = aggregateValue / counts.get(entry.getKey());
+                }
+                Tuple tuple = new Tuple(td);
+                tuple.setField(0, entry.getKey());
+                tuple.setField(1, new IntField(aggregateValue));
+                tuples.add(tuple);
+            }
+        }
+
+        return new TupleIterator(td, tuples);
     }
 
 }
