@@ -88,8 +88,12 @@ public class HeapFile implements DbFile {
 
     // see DbFile.java for javadocs
     public void writePage(Page page) throws IOException {
-        // some code goes here
-        // not necessary for lab1
+        int pageSize = BufferPool.getPageSize();
+        long offset = (long) page.getId().getPageNumber() * pageSize;
+        try (RandomAccessFile raf = new RandomAccessFile(file, "rw")) {
+            raf.seek(offset);
+            raf.write(page.getPageData());
+        }
     }
 
     /**
@@ -102,17 +106,38 @@ public class HeapFile implements DbFile {
     // see DbFile.java for javadocs
     public List<Page> insertTuple(TransactionId tid, Tuple t)
             throws DbException, IOException, TransactionAbortedException {
-        // some code goes here
-        return null;
-        // not necessary for lab1
+        ArrayList<Page> modifiedPages = new ArrayList<>();
+
+        for (int i = 0; i < numPages(); i++) {
+            HeapPage page = (HeapPage) Database.getBufferPool().getPage(
+                    tid, new HeapPageId(getId(), i), Permissions.READ_WRITE);
+            if (page.getNumEmptySlots() > 0) {
+                page.insertTuple(t);
+                modifiedPages.add(page);
+                return modifiedPages;
+            }
+        }
+
+        try (BufferedOutputStream bw = new BufferedOutputStream(new FileOutputStream(file, true))) {
+            bw.write(HeapPage.createEmptyPageData());
+        }
+
+        HeapPage newPage = new HeapPage(new HeapPageId(getId(), numPages() - 1), HeapPage.createEmptyPageData());
+        newPage.insertTuple(t);
+        writePage(newPage);
+        modifiedPages.add(newPage);
+        return modifiedPages;
     }
 
     // see DbFile.java for javadocs
     public ArrayList<Page> deleteTuple(TransactionId tid, Tuple t) throws DbException,
             TransactionAbortedException {
-        // some code goes here
-        return null;
-        // not necessary for lab1
+        ArrayList<Page> modifiedPages = new ArrayList<>();
+        HeapPage page = (HeapPage) Database.getBufferPool().getPage(
+                tid, t.getRecordId().getPageId(), Permissions.READ_WRITE);
+        page.deleteTuple(t);
+        modifiedPages.add(page);
+        return modifiedPages;
     }
 
     // see DbFile.java for javadocs
