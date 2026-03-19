@@ -22,6 +22,9 @@ import java.util.*;
  */
 public class HeapFile implements DbFile {
 
+    private final File file;
+    private final TupleDesc tupleDesc;
+
     /**
      * Constructs a heap file backed by the specified file.
      * 
@@ -30,7 +33,8 @@ public class HeapFile implements DbFile {
      *            file.
      */
     public HeapFile(File f, TupleDesc td) {
-        // some code goes here
+        this.file = f;
+        this.tupleDesc = td;
     }
 
     /**
@@ -39,8 +43,7 @@ public class HeapFile implements DbFile {
      * @return the File backing this HeapFile on disk.
      */
     public File getFile() {
-        // some code goes here
-        return null;
+        return file;
     }
 
     /**
@@ -53,8 +56,7 @@ public class HeapFile implements DbFile {
      * @return an ID uniquely identifying this HeapFile.
      */
     public int getId() {
-        // some code goes here
-        throw new UnsupportedOperationException("implement this");
+        return file.getAbsoluteFile().hashCode();
     }
 
     /**
@@ -63,14 +65,25 @@ public class HeapFile implements DbFile {
      * @return TupleDesc of this DbFile.
      */
     public TupleDesc getTupleDesc() {
-        // some code goes here
-        throw new UnsupportedOperationException("implement this");
+        return tupleDesc;
     }
 
     // see DbFile.java for javadocs
     public Page readPage(PageId pid) {
-        // some code goes here
-        return null;
+        int pageSize = BufferPool.getPageSize();
+        long offset = (long) pid.getPageNumber() * pageSize;
+        byte[] data = new byte[pageSize];
+
+        try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+            if (offset < 0 || offset + pageSize > raf.length()) {
+                throw new IllegalArgumentException("page does not exist");
+            }
+            raf.seek(offset);
+            raf.readFully(data);
+            return new HeapPage((HeapPageId) pid, data);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("unable to read page", e);
+        }
     }
 
     // see DbFile.java for javadocs
@@ -83,8 +96,7 @@ public class HeapFile implements DbFile {
      * Returns the number of pages in this HeapFile.
      */
     public int numPages() {
-        // some code goes here
-        return 0;
+        return (int) (file.length() / BufferPool.getPageSize());
     }
 
     // see DbFile.java for javadocs
@@ -105,9 +117,55 @@ public class HeapFile implements DbFile {
 
     // see DbFile.java for javadocs
     public DbFileIterator iterator(TransactionId tid) {
-        // some code goes here
-        return null;
+        return new AbstractDbFileIterator() {
+            private int pageNo;
+            private Iterator<Tuple> tupleIterator;
+            private boolean open;
+
+            @Override
+            public void open() {
+                pageNo = 0;
+                tupleIterator = null;
+                open = true;
+            }
+
+            @Override
+            protected Tuple readNext() throws DbException, TransactionAbortedException {
+                if (!open) {
+                    return null;
+                }
+
+                while (pageNo < numPages()) {
+                    if (tupleIterator == null) {
+                        HeapPageId pid = new HeapPageId(getId(), pageNo);
+                        HeapPage page = (HeapPage) Database.getBufferPool().getPage(tid, pid, Permissions.READ_ONLY);
+                        tupleIterator = page.iterator();
+                    }
+
+                    if (tupleIterator.hasNext()) {
+                        return tupleIterator.next();
+                    }
+
+                    pageNo++;
+                    tupleIterator = null;
+                }
+                return null;
+            }
+
+            @Override
+            public void rewind() {
+                close();
+                open();
+            }
+
+            @Override
+            public void close() {
+                super.close();
+                pageNo = 0;
+                tupleIterator = null;
+                open = false;
+            }
+        };
     }
 
 }
-
