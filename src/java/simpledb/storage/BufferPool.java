@@ -148,6 +148,13 @@ public class BufferPool {
                 for (PageId pid : new ArrayList<>(pages.keySet())) {
                     Page page = pages.get(pid);
                     if (page != null && tid.equals(page.isDirty())) {
+                        DbFile file = Database.getCatalog().getDatabaseFile(pid.getTableId());
+                        try {
+                            file.writePage(page.getBeforeImage());
+                            page.markDirty(false, null);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
                         discardPage(pid);
                     }
                 }
@@ -246,6 +253,7 @@ public class BufferPool {
             DbFile file = Database.getCatalog().getDatabaseFile(pid.getTableId());
             file.writePage(page);
             page.markDirty(false, null);
+            page.setBeforeImage();
         }
     }
 
@@ -269,7 +277,19 @@ public class BufferPool {
             throw new DbException("no pages to evict");
         }
 
-        PageId victim = pages.keySet().iterator().next();
+        PageId victim = null;
+        for (Map.Entry<PageId, Page> entry : pages.entrySet()) {
+            Page page = entry.getValue();
+            if (page != null && page.isDirty() == null) {
+                victim = entry.getKey();
+                break;
+            }
+        }
+
+        if (victim == null) {
+            throw new DbException("all pages are dirty");
+        }
+
         try {
             flushPage(victim);
         } catch (IOException e) {
