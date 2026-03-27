@@ -271,12 +271,19 @@ public class BufferPool {
             throw new DbException("no pages to evict");
         }
 
-        PageId victim = pages.keySet().iterator().next();
-        try {
-            flushPage(victim);
-        } catch (IOException e) {
-            throw new DbException("unable to evict page");
+        PageId victim = null;
+        for (PageId pid : pages.keySet()) {
+            Page page = pages.get(pid);
+            if (page != null && page.isDirty() == null) {
+                victim = pid;
+                break;
+            }
         }
+
+        if (victim == null) {
+            throw new DbException("all pages are dirty");
+        }
+
         pages.remove(victim);
     }
 
