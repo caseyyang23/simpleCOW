@@ -4,6 +4,7 @@ import simpledb.common.Database;
 import simpledb.common.Permissions;
 import simpledb.common.DbException;
 import simpledb.common.DeadlockException;
+import simpledb.transaction.LockManager;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
@@ -37,6 +38,7 @@ public class BufferPool {
     public static final int DEFAULT_PAGES = 50;
     private final int numPages;
     private final Map<PageId, Page> pages;
+    private final LockManager lockManager;
 
     /**
      * Creates a BufferPool that caches up to numPages pages.
@@ -46,6 +48,7 @@ public class BufferPool {
     public BufferPool(int numPages) {
         this.numPages = numPages;
         this.pages = new LinkedHashMap<>(16, 0.75f, true);
+        this.lockManager = new LockManager();
     }
     
     public static int getPageSize() {
@@ -77,21 +80,25 @@ public class BufferPool {
      * @param pid the ID of the requested page
      * @param perm the requested permissions on the page
      */
-    public synchronized Page getPage(TransactionId tid, PageId pid, Permissions perm)
+    public Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
-        Page page = pages.get(pid);
-        if (page != null) {
-            return page;
-        }
+        lockManager.acquireLock(tid, pid, perm);
 
-        if (pages.size() >= numPages) {
-            evictPage();
-        }
+        synchronized (this) {
+            Page page = pages.get(pid);
+            if (page != null) {
+                return page;
+            }
 
-        DbFile file = Database.getCatalog().getDatabaseFile(pid.getTableId());
-        Page newPage = file.readPage(pid);
-        pages.put(pid, newPage);
-        return newPage;
+            if (pages.size() >= numPages) {
+                evictPage();
+            }
+
+            DbFile file = Database.getCatalog().getDatabaseFile(pid.getTableId());
+            Page newPage = file.readPage(pid);
+            pages.put(pid, newPage);
+            return newPage;
+        }
     }
 
     /**
@@ -104,8 +111,7 @@ public class BufferPool {
      * @param pid the ID of the page to unlock
      */
     public  void unsafeReleasePage(TransactionId tid, PageId pid) {
-        // some code goes here
-        // not necessary for lab1|lab2
+        lockManager.releaseLock(tid, pid);
     }
 
     /**
@@ -114,15 +120,12 @@ public class BufferPool {
      * @param tid the ID of the transaction requesting the unlock
      */
     public void transactionComplete(TransactionId tid) {
-        // some code goes here
-        // not necessary for lab1|lab2
+        transactionComplete(tid, true);
     }
 
     /** Return true if the specified transaction has a lock on the specified page */
     public boolean holdsLock(TransactionId tid, PageId p) {
-        // some code goes here
-        // not necessary for lab1|lab2
-        return false;
+        return lockManager.holdsLock(tid, p);
     }
 
     /**
@@ -133,8 +136,15 @@ public class BufferPool {
      * @param commit a flag indicating whether we should commit or abort
      */
     public void transactionComplete(TransactionId tid, boolean commit) {
-        // some code goes here
-        // not necessary for lab1|lab2
+        try {
+            if (commit) {
+                flushPages(tid);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        } finally {
+            lockManager.releaseAllLock(tid);
+        }
     }
 
     /**
