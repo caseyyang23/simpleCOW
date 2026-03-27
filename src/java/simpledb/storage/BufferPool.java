@@ -139,6 +139,17 @@ public class BufferPool {
         try {
             if (commit) {
                 flushPages(tid);
+            } else {
+                synchronized (this) {
+                    for (PageId pid : new ArrayList<>(pages.keySet())) {
+                        Page page = pages.get(pid);
+                        if (page != null && tid.equals(page.isDirty())) {
+                            Page beforeImage = page.getBeforeImage();
+                            beforeImage.markDirty(false, null);
+                            pages.put(pid, beforeImage);
+                        }
+                    }
+                }
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
