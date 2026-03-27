@@ -248,6 +248,7 @@ public class BufferPool {
             DbFile file = Database.getCatalog().getDatabaseFile(pid.getTableId());
             file.writePage(page);
             page.markDirty(false, null);
+            page.setBeforeImage();
         }
     }
 
@@ -272,8 +273,9 @@ public class BufferPool {
         }
 
         PageId victim = null;
-        for (PageId pid : pages.keySet()) {
-            Page page = pages.get(pid);
+        for (Map.Entry<PageId, Page> entry : pages.entrySet()) {
+            PageId pid = entry.getKey();
+            Page page = entry.getValue();
             if (page != null && page.isDirty() == null) {
                 victim = pid;
                 break;
